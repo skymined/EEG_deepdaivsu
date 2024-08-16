@@ -87,8 +87,8 @@ class MCA(nn.Module):
         # v = self.v(x2).reshape(B2 * N2, T2, self.num_head, -1).transpose(1, 2)
 
         q = self.q(x1)
-        k = self.k(x1)
-        v = self.v(x1)
+        k = self.k(x2)
+        v = self.v(x2)
         attn = q @ k.transpose(-1, -2) / np.sqrt(C1)
         if m2 is not None:
             m2 = m2.reshape(B2, 1, 1, 1, T2)
@@ -120,7 +120,7 @@ class Embed_CrossAttention(nn.Module):
 
     def forward(self, x1, x2, x3):
         x1_pad = x1.transpose(1, 2)
-        x1_pad = F.pad(x1_pad, (0, 0, 0, x1_pad.shape[1]))
+        ## x1_pad = F.pad(x1_pad, (0, 0, 0, x1_pad.shape[1]))
         x1_pad = x1_pad.transpose(0, 1)
 
         x2_pad = x2.transpose(1, 2).transpose(0, 1)
@@ -129,7 +129,7 @@ class Embed_CrossAttention(nn.Module):
         att_output1, _ = self.mha(x2_pad, x1_pad, x1_pad)
 
         att_output1 = att_output1.transpose(0, 1)
-        att_output1 = F.pad(att_output1, (0, 0, 0, att_output1.shape[1]))
+        ## att_output1 = F.pad(att_output1, (0, 0, 0, att_output1.shape[1]))
         att_output1 = att_output1.transpose(0, 1)
 
         att_output2, _ = self.mha2(x3_pad, att_output1, att_output1)
