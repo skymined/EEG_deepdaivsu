@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 from model import Baseline_model
 from dataloader import load_data
 
+best_test = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
 def train(model, train_loader, criterion, optimizer, epoch, device):
     model.train()
     running_loss = 0.0
@@ -17,17 +19,15 @@ def train(model, train_loader, criterion, optimizer, epoch, device):
         outputs = model(inputs, device)
 
         loss = criterion(outputs, labels)
-        old_state=model.state_dict()
         loss.backward()
         optimizer.step()
-        new_state=model.state_dict()
         running_loss += loss.item()
         if i % 10 == 9:  
             print(f"[Epoch {epoch + 1}, Batch {i + 1}] loss: {running_loss / 10:.3f}")
             
             running_loss = 0.0
 
-def evaluate(model, test_loader, criterion, device):
+def evaluate(model, test_loader, criterion, device, test_no):
     model.eval()
     correct = 0
     total = 0
@@ -47,14 +47,19 @@ def evaluate(model, test_loader, criterion, device):
     avg_loss = test_loss / len(test_loader)
     print(f"Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.4f}")
 
+    if accuracy > best_test[test_no]:
+        best_test[test_no] = accuracy
+
+    
+
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
 
     for test_no in range(15):
         batch_size = 32
-        learning_rate = 0.0003
-        num_epochs = 30
+        learning_rate = 0.0005
+        num_epochs = 300
 
         model = Baseline_model(in_channel=5,
                             out_channel=64,
@@ -84,8 +89,13 @@ if __name__ == "__main__":
 
             train(model, train_loader, criterion, optimizer, epoch, device)
 
-            
             print(f"\nTesting at epoch {epoch + 1}:")
-            evaluate(model, test_loader, criterion, device)
+            evaluate(model, test_loader, criterion, device, test_no)
             print("-" * 50)
             torch.save(model.state_dict(), f'./model/test{test_no}_epoch{epoch}.pt')
+
+    
+    print("-" * 50)
+    print("-" * 50)
+    for i in range(15):
+        print(f'test_no.{i} score: {best_test[i]}\n')
