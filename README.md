@@ -16,10 +16,16 @@
   - `SEED_data/`
     - 새로 생성해야하는 빈 디렉토리.
     - `make_feature.py` 실행 후 `train{피험자번호}de.pt` 및 `test{피험자번호}de.pt` 파일이 저장됨.
+   
+- **한줄 요약**
+  "ExtractedFeatures", "SEED_data"이라는 폴더 만들고, ExtractedFeatures 폴더 내부에는 피험자 데이터 넣어주기.
 
 ## `main.py` 실행 전 요구 사항
 
-- **디렉토리 및 파일**:
+- **디렉토리**:
   - `model/`
     - 새로 생성해야하는 빈 디렉토리.
     - `main.py` 실행 후 `test{피험자번호}_best.pt` 파일이 저장됨.
+   
+- **한줄 요약**
+  "model"이라는 폴더 만들기.
