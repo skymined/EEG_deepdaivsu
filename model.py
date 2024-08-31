@@ -6,26 +6,35 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 
-class PositionalEncoding(nn.Module):
-
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+class LayerNorm(nn.Module):
+    def __init__(self, embed_dim, channel):
         super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
+        self.norm = nn.LayerNorm([channel, embed_dim])
 
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
+    def forward(self, x):
+        b, t, n, c = x.shape
+        x = x.reshape(b * t, n, c)
+        x = self.norm(x)
+        x = x.reshape(b, t, n, c)
+        return x
 
-    def forward(self, x: Tensor) -> Tensor:
-        """
-        Arguments:
-            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
-        """
-        return self.dropout(self.pe[:x.size(0)].to(x.device))
-    
+
+class MLP(nn.Module):
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(embed_dim, embed_dim)
+        #self.fc2 = nn.Linear(output_channels, output_channels)
+        self.dropout = nn.Dropout(0.1)
+        self.act = nn.ReLU()
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.dropout(x)
+
+        return x
+
+
 class MCA(nn.Module):
     def __init__(self, embed_dim, num_heads=4):
         super().__init__()
@@ -37,17 +46,16 @@ class MCA(nn.Module):
         self.num_head = num_heads
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, x1, x2, x3, m2=None):
+    def forward(self, x1, x2, m2=None):
 
-        T1, B1, C1 = x1.shape  ## (66, 1984, 64)
-        T2, B2, C2 = x2.shape  ## (66, 1984, 64)
 
-        x1 = x1.transpose(0, 1)  ## (1984, 66, 64)
-        x2 = x2.transpose(0, 1)  ## (1984, 66, 64)
-
-        q = self.q(x1)
-        k = self.k(x2)
-        v = self.v(x2)
+        B1, T1, N1, C1 = x1.shape # if x2,x3 -> batch, 66, 62, 64  elif x1,x2 -> batch, 132, 62, 64
+        B2, T2, N2, C2 = x2.shape # if x2,x3 -> batch, 33, 62, 64  elif x1,x2 -> batch, 66, 62, 64
+        x1 = x1.transpose(1, 2).reshape(B1 * N1, T1, C1)
+        x2 = x2.transpose(1, 2).reshape(B2 * N2, T2, C2)
+        q = self.q(x1).reshape(B1 * N1, T1, self.num_head, -1).transpose(1, 2)
+        k = self.k(x2).reshape(B2 * N2, T2, self.num_head, -1).transpose(1, 2)
+        v = self.v(x2).reshape(B2 * N2, T2, self.num_head, -1).transpose(1, 2)
         attn = q @ k.transpose(-1, -2) / np.sqrt(C1)
         if m2 is not None:
             m2 = m2.reshape(B2, 1, 1, 1, T2)
@@ -56,11 +64,52 @@ class MCA(nn.Module):
             attn = attn.masked_fill(m2 == 0, -1e9)
         attn = self.softmax(attn)
         attn = self.dropout(attn)
-        x = attn @ v
-
+        x = (attn @ v).transpose(1, 2)
+        x = x.reshape(B1, N1, T1, C1).transpose(1, 2)
         x = self.u(x)
         x = self.dropout(x)
-        x = x.transpose(0, 1)
+        return x
+
+class CrossFusion(nn.Module):
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.mca = MCA(embed_dim)
+        self.mlp = MLP(embed_dim)
+        self.norm1_1 = LayerNorm(embed_dim, 62)
+        self.norm1_2 = LayerNorm(embed_dim, 62)
+        self.norm = LayerNorm(embed_dim, 62)
+        
+    def forward(self, x1, x2, m2):
+        # Attention
+        h1 = self.norm1_1(x1)
+        h2 = self.norm1_2(x2)   
+        h = self.mca(h1, h2, m2)
+        x = x1 + h
+
+        # MLP
+        h = self.norm(x)
+        h = self.mlp(h)
+        x = x + h
+        return x
+
+class selfatt(nn.Module):
+    def __init__(self, embed_dim, num_heads=4):
+        super().__init__()
+        self.multi_att = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=0.1, batch_first=True)
+        self.mlp = MLP(embed_dim)
+        self.norm1_1 = LayerNorm(embed_dim, 62)
+        self.norm = LayerNorm(embed_dim, 62)
+        
+    def forward(self, x, m):
+        # Attention
+        #h = self.norm1_1(x)   
+        h, _ = self.multi_att(x, x, x, attn_mask=m)
+        x = x + h
+
+        # MLP
+        #h = self.norm(x)
+        h = self.mlp(x)
+        x = x + h
         return x
 
 class Conv1DEncoder(nn.Module):
@@ -79,51 +128,51 @@ class Conv1DEncoder(nn.Module):
                                kernel_size=2, 
                                stride=2)
         self.relu = nn.ReLU()
-        self.avgPool = nn.AvgPool1d(kernel_size=2, stride=2)
+        self.pool1 = nn.AvgPool1d(2, 2)
+        self.pool2 = nn.AvgPool1d(2, 2)
+        self.pool3 = nn.AvgPool1d(2, 2)
+        self.hidden_dim = output_channels
     
-    def forward(self, x, position, device):
-        x = self.conv1(x)
-        x1 = self.relu(x)
-        pos1 = self.avgPool(position)
-        embed_pos1 = pos1.repeat(x.shape[0], 1, 1).to(device) 
-        
+    def forward(self, x, pos):
+        b, t, n = x.shape[:3]
+        x = x.permute(0, 2, 3, 1).reshape(b *n, -1, t)# batch*62, 5, 265
+        pos = pos.permute(0, 2, 3, 1).reshape(b *n, -1, t)# batch*62, 5, 265
+
+        x1 = self.conv1(x)
         x2 = self.conv2(x1)
-        x2 = self.relu(x2)
-        pos2 = self.avgPool(pos1)
-        embed_pos2 = pos2.repeat(x.shape[0], 1, 1).to(device) 
-
         x3 = self.conv3(x2)
-        x3 = self.relu(x3)
-        pos3 = self.avgPool(pos2)
-        embed_pos3 = pos3.repeat(x.shape[0], 1, 1).to(device) 
+        x1 = x1.reshape(b, n, self.hidden_dim, -1).permute(0, 3, 1, 2)# batch, 132, 62, 64
+        x2 = x2.reshape(b, n, self.hidden_dim, -1).permute(0, 3, 1, 2)# batch, 66, 62, 64
+        x3 = x3.reshape(b, n, self.hidden_dim, -1).permute(0, 3, 1, 2)# batch, 33, 62, 64
 
-        return x1+embed_pos1, x2+embed_pos2, x3+embed_pos3
+        p1 = self.pool1(pos)
+        p2 = self.pool2(p1)
+        p3 = self.pool3(p2)
+        
+        p1 = p1.reshape(b, n, self.hidden_dim, -1).permute(0, 3, 1, 2)# batch, 132, 62, 64
+        p2 = p2.reshape(b, n, self.hidden_dim, -1).permute(0, 3, 1, 2)# batch, 66, 62, 64
+        p3 = p3.reshape(b, n, self.hidden_dim, -1).permute(0, 3, 1, 2)# batch, 33, 62, 64
+
+        return x1+p1, x2+p2, x3+p3
 
 class Embed_CrossAttention(nn.Module):
-    def __init__(self, embed_dim, num_heads, channel):
+    def __init__(self, embed_dim):
         super(Embed_CrossAttention, self).__init__()
-        self.mha = MCA(embed_dim=embed_dim, num_heads=num_heads)
-        self.mha2 = MCA(embed_dim=embed_dim, num_heads=num_heads)
+        self.cross_fusion21 = CrossFusion(embed_dim)
+        self.cross_fusion32 = CrossFusion(embed_dim)
         self.relu = nn.ReLU()
-        self.avgPool = nn.AvgPool1d(kernel_size=channel, stride=channel)
+        self.norm = LayerNorm(embed_dim, 62)
+        self.dropout = nn.Dropout(0.1)
     
     def forward(self, x1, x2, x3):
-        x1_pad = x1.transpose(1, 2)
-        x1_pad = x1_pad.transpose(0, 1)
+        x2 = self.cross_fusion32(x2, x3, None)
+        x1 = self.cross_fusion21(x1, x2, None)
 
-        x2_pad = x2.transpose(1, 2).transpose(0, 1)
-        x3_pad = x3.transpose(1, 2).transpose(0, 1)
+        x = self.relu(self.norm(x1))
+        x = x.mean([-2])
+        x = self.dropout(x)
 
-        att_output1 = self.mha(x2_pad, x1_pad, x1_pad)
-        att_output1 = self.relu(att_output1)
-
-        att_output2 = self.mha2(x3_pad, att_output1, att_output1)
-        att_output2 = self.relu(att_output2)
-
-        att_output2 = att_output2.transpose(1, 2)
-        output = self.avgPool(att_output2)
-
-        return output
+        return x # batch,132,64
 
 class Classifier_per_time(nn.Module):
     def __init__(self, embed_dim, output_dim):
@@ -133,55 +182,49 @@ class Classifier_per_time(nn.Module):
         self.relu = nn.ReLU()
     
     def forward(self, x):
-        output1 = x.permute(1, 2, 0)
+        output1 = x.permute(0,2,1)
 
         output2 = self.conv1(output1)
-        output2 = F.relu(output2)
+        output2 = self.relu(output2)
         output2 = output2.transpose(1, 2)
 
-        output3 = self.linear1(output2)
-
+        output3 = self.linear1(output2)# batch,132,3
         return output3
 
 # 5, 64, 62, 3, 8, 25
 class Baseline_model(nn.Module):
     def __init__(self, in_channel, out_channel, input_dim, final_dim, num_heads, topk):
         super(Baseline_model, self).__init__()
-        self.pos_encoder = PositionalEncoding(out_channel, 0.1, 300)
         self.encoder = Conv1DEncoder(in_channel, out_channel)
-        self.eca = Embed_CrossAttention(out_channel, num_heads, input_dim)
-        self.self_attention = nn.MultiheadAttention(embed_dim=out_channel, num_heads=num_heads)
+        self.eca = Embed_CrossAttention(out_channel)
+        self.self_attention = selfatt(embed_dim=out_channel)
         self.classifier = Classifier_per_time(embed_dim=out_channel, output_dim=final_dim)
         self.relu = nn.ReLU()
-        self.linear = nn.Linear(in_features=132, out_features=1)
-        self.maxPool = nn.MaxPool1d(kernel_size=12, stride=12)
+        self.topk = topk
+        self.classes = 3
+        self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, x, device):
-        batch_size = x.shape[0]
-        x = x.reshape(x.shape[0] * x.shape[1], x.shape[2], -1)
-        x = x.transpose(0, 1)
-        pos_x = self.pos_encoder(x).to(device)
-        x = x.permute(1, 2, 0)
-        pos_x = pos_x.permute(1, 2, 0)
+    def forward(self, x, pos):
+		    #x.shape = 62,265,5
+        embed1, embed2, embed3 = self.encoder(x, pos)
+        final_embed = self.eca(embed1, embed2, embed3) # batch,132,64
 
-        embed1, embed2, embed3 = self.encoder(x, pos_x, device)
-        final_embed = self.eca(embed3, embed2, embed1)
+        sf_attention_output = self.self_attention(final_embed, None)
 
-        final_embed = final_embed.transpose(1, 2)
-        sf_attention_output, _ = self.self_attention(final_embed, final_embed, final_embed)
-        sf_attention_output = self.relu(sf_attention_output)
+        class_output = self.classifier(sf_attention_output)#batch,132,3
 
-        class_output = self.classifier(sf_attention_output)
+        y = []
+        B, T = class_output.shape[:2]  # 8, 132, 3 => 8, 132
+        #print(x.shape)
         
-        max_values, _ = class_output.max(dim=-1)
-        topk_values, topk_indices = torch.topk(max_values, 25, dim=1)
+        topk = self.topk
+        for c in range(self.classes):
+            s = class_output[:, :, c]
+            i = torch.topk(s, topk, dim=-1)[1]
+            yc = [torch.mean(class_output[b, i[b, :], c], dim=0) for b in range(B)]
+            yc = torch.stack(yc, dim=0)
+            y.append(yc)
+        y = torch.stack(y, dim=-1)
+        y_soft = self.softmax(y)
 
-        top_25_vectors = torch.zeros((batch_size, 25, 3)).to(device)
-        for i in range(final_embed.shape[1]):
-            top_25_vectors[i, :, :] = class_output[i, topk_indices[i]]
-
-        final_output = top_25_vectors.mean(dim=1)
-
-        final_output = F.softmax(final_output, dim=-1)
-
-        return final_output
+        return y_soft
