@@ -43,8 +43,8 @@ class SeedDataset(Dataset):
 		    
         if self.training:
             T_max = masks.sum()
-            T = random.randint(0, int(0.5 * T_max))
-            N = random.randint(0, int(0.5 * self.channels))
+            T = int(0.2 * T_max)
+            N = int(0.2 * self.channels)
             t1 = random.randint(0, T_max - T)
             t2 = t1 + T
             n1 = random.randint(0, self.channels - N)
@@ -58,4 +58,4 @@ class SeedDataset(Dataset):
         frame_pos_embeddings = frame_pos_embeddings.reshape(self.frames, 1, self.dim_embed)
         frame_pos_embeddings = frame_pos_embeddings.expand(self.frames, self.channels, self.dim_embed)
         
-        return inputs, frame_pos_embeddings, labels
+        return inputs, frame_pos_embeddings, labels, masks
