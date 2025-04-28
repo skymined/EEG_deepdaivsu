@@ -70,7 +70,7 @@ EEG 기반 감정 인식(Emotion Recognition)은 생체 신호를 분석하여 �
 
 모델 학습과 성능 평가를 위해 사용한 데이터셋은 다음과 같습니다. `SEED`는 상하이 교통 대학 연구소에서 제공하는 **EEG 기반의 감정 분석 데이터셋**으로 **긍정적, 부정적, 중립적** 3가지 감정을 유발하는 15개의 중국 영화 클립이 활용되며, 각 클립의 길이는 약 **4분입니다.**
 
-![alt text](pics\image-2.png)
+![alt text](pics/image-2.png)
 
 실험은 일주일 간격으로 **총 3회** 진행되었으며, 각 실험에서 피험자들은  **<5초의 힌트, 4분의 영상 시청, 45초의 자기 평가, 15초의 휴식>** 루틴을 반복하며 15개의 영상을 시청하였습니다. 오른쪽 그림과 같이 62채널 ESI NeuroScan 시스템과 SMI 시선 추적 안경을 이용해 **EEG 신호와 시선 데이터**를 수집했습니다.
 
@@ -112,7 +112,7 @@ EEG 데이터, 그중에서도 SEED 데이터를 분석한 결과, 4가지의 �
 
 ## 4. 아키텍처 설명
 
-![alt text](pics\image-3.png)
+![alt text](pics/image-3.png)
 
 전체 Architecutre입니다. 크게 **Encoder Block,  Attention Block, Classifier Block** 구성되어 있습니다. **Encoder Block**에서는 EEG 데이터의 장기적, 단기적 시간 패턴을 추출하고, **Attention Block**에서는 4분 동안의 뇌파 데이터 중 각 시점의 중요도(최종 감정 분류에 미치는 중요도)를 평가합니다. 마지막으로 **Classifier Block**에서는 각 시점에서 예측된 감정 클래스 확률을 종합하여 최종 클래스를 결정합니다.
 
@@ -127,7 +127,7 @@ EEG 데이터, 그중에서도 SEED 데이터를 분석한 결과, 4가지의 �
 
 ### 1️⃣ Encoder Block
 
-![alt text](pics\image-4.png)
+![alt text](pics/image-4.png)
 
 첫번째로 **`Encoder Block`**인데요, 먼저 **1D Convolution Layer**를 3번 거칩니다. 이를 통해 모델은 2초 단위의 작은 범위를 학습하다가, 그 다음에는 4초 단위, 그리고 8초 단위까지 점점 긴 시간의 특징을 학습할 수 있게 됩니다. 
 
@@ -145,25 +145,25 @@ EEG 데이터, 그중에서도 SEED 데이터를 분석한 결과, 4가지의 �
 
 ### 2️⃣ Attention Block
 
-![alt text](pics\image-5.png)
+![alt text](pics/image-5.png)
 
 다음은 **`Attention Block`**으로 넘어갑니다. 먼저 평균을 취해 EEG 데이터 내 서로 다른 채널, 즉 **공간 정보를 하나로 합쳐주는 과정**을 진행합니다. 피험자마다 부착된 전극의 위치가 미세하게 다를 수 있고, 공간적 차이보다는 시간에 따른 패턴을 학습하는 것이 주 목적이기 때문에 여러 채널에 나타나는 특징들을 하나의 벡터로 축약해줍니다.
 
-![alt text](pics\image-6.png)
+![alt text](pics/image-6.png)
 
 이후 **Self-Attention**을 통해 특정 시점의 신호가 다른 신호들과 어떤 연관성을 가지는지, 또 얼마나 큰 영향력을 갖는지 계산합니다. 다시 말해, 입력 내 각 타임스탬프가 다른 타임스탬프와 어떻게 연관되어 있는지 학습하여 각 요소들이 모델 출력에 얼마나 중요한 영향력을 미치는지 고려하는 과정이에요. 높은 Attention Score를 갖는 시점일수록 최종 감정 분류 과정에 더 주요한 영향력을 미치게 될 것입니다.
 
 ### 3️⃣ Classifier Block
 
-![alt text](pics\image-7.png)
+![alt text](pics/image-7.png)
 
 마지막으로 `Classifier Block`입니다. 앞서 Attention 연산으로 구한 값을 바탕으로 1D Convolution 레이어와 Fully Connected 레이어를 거쳐 **데이터를 이루는 모든** **시점이 각각 어떤 감정 레이블에 해당할지 예측**을 수행합니다. 
 
-![alt text](pics\image-8.png)
+![alt text](pics/image-8.png)
 
 그런 다음 그 예측 결과 중 **각 감정 클래스 별 Score가 가장 높은 K개의 시점을 선택**합니다. Score가 높다는 것은 해당 시점에서 특정 감정이 강하게 나타난다는 것을 의미하는데, 이렇게 감정이 강하게 나타나는 주요한 시점만 선별하여 최종 감정 레이블을 선택하려고 합니다.
 
-![alt text](pics\image-9.png)
+![alt text](pics/image-9.png)
 
 예를 들어 살펴보겠습니다. 위 이미지와 같이 총 5개의 타임 스탬프(시점)와 3개의 감정 레이블이 존재한다고 할 때, 시점 별로 각 감정 레이블에 속할 Score의 확률 값을 구합니다(왼쪽). K를 2라고 설정하고, 5개의 시점들 중 각 감정 클래스 별로 Score가 높은 시점 2개씩을 선별합니다.
 
@@ -187,13 +187,13 @@ Masking으로 Data Augmentation을 하자!
 
 ### LOSO
 
-![alt text](pics\image-10.png)
+![alt text](pics/image-10.png)
 
 EEG 데이터는 그 특성 상 수가 매우 적고, 데이터마다 분포가 매우 다르기 때문에 Subject Dependency 문제가 발생합니다. 이를 해결하기 위해서 LOSO 기법을 이용하기로 했어요.
 
 LOSO(Leave One Subject Out) 기법은 **한 명의 피험자 데이터를 Test Set으로, 나머지 피험자들의 데이터를 Train Set으로 활용**하는 방법입니다. 특정 피험자의 데이터로 학습시키고 같은 데이터로 평가하는 방식과 달리 모델이 새로운 데이터에 대해서도 예측을 잘 수행하는지 평가할 수 있기 때문에 일반화 능력을 평가할 때 활용합니다. 
 
-![alt text](pics\image-11.png)
+![alt text](pics/image-11.png)
 
 ### Masking
 
@@ -245,7 +245,7 @@ LOSO(Leave One Subject Out) 기법은 **한 명의 피험자 데이터를 Test S
 
 실험의 결과는 위와 같이 **평균 0.9926**의 높은 정확도를 보여주었습니다. 앞서 정의한 문제들이 적절했고, 이를 해결하기 위한 아키텍처가 잘 설계되었다고 볼 수 있는 결과입니다!
 
-![alt text](pics\image-12.png)
+![alt text](pics/image-12.png)
 
 지금까지 EEG 기반 감정 인식 분야의 SOTA는 EEG 기반 Motor Imagery (뇌파를 통해 상상된 운동 동작을 인식하고 해석하는 뇌-컴퓨터 인터페이스 기술) 모델 ATCNet을 감정 인식 분야에 접목하여 0.9571의 정확도를 보여준 연구였는데요, 저희 모델이 LOSO 평가 결과 0.9926이라는 성능을 달성하며 기존의 SOTA를 능가했습니다.
 
